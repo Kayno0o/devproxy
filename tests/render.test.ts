@@ -6,7 +6,7 @@ import { resolved, ROUTES } from './fixtures'
 
 describe('resolveConfig', () => {
   test('fills the defaults and resolves dir against the config folder', () => {
-    expect(resolveConfig({ dir: 'state' }, '/etc/devproxy')).toEqual({ name: 'devproxy', dir: '/etc/devproxy/state', network: 'devproxy', ports: { http: 80, https: 443 }, image: 'nginx:alpine', routes: [] })
+    expect(resolveConfig({ dir: 'state' }, '/etc/devproxy')).toEqual({ name: 'devproxy', dir: '/etc/devproxy/state', network: 'devproxy', ports: { http: 80, https: 443 }, image: 'nginx:alpine', labels: true, watchImage: 'oven/bun:1.4.4-alpine', routes: [] })
   })
 
   test.each([
@@ -62,8 +62,17 @@ describe('render', () => {
 
   test('nginx.conf and compose point at the configured folder, name, ports and network', () => {
     expect(renderNginx(config)).toContain('include /srv/proxy/nginx/main.conf;\n    include /srv/proxy/nginx/http/*.conf;')
-    expect(renderCompose({ ...config, ports: { http: 8080, https: 8443 } })).toContain('container_name: devproxy-test\n')
-    expect(renderCompose({ ...config, ports: { http: 8080, https: 8443 } })).toContain('- "8080:80"\n      - "8443:443"')
-    expect(renderCompose(config)).toContain('- /srv/proxy:/srv/proxy\n    networks:\n      - devproxy-test')
+    expect(renderCompose({ ...config, ports: { http: 8080, https: 8443 } }, undefined)).toContain('container_name: devproxy-test\n')
+    expect(renderCompose({ ...config, ports: { http: 8080, https: 8443 } }, undefined)).toContain('- "8080:80"\n      - "8443:443"')
+    expect(renderCompose(config, undefined)).toContain('- /srv/proxy:/srv/proxy\n    networks:\n      - devproxy-test')
+    expect(renderCompose(config, undefined)).not.toContain('watch:')
+  })
+
+  test('the watch service runs the same devproxy on the state dir, as the host user, off any network', () => {
+    const compose = renderCompose(config, { entry: '/pkg/dist/cli.js', root: '/pkg', uid: 1000, gid: 1000, socket: '/run/docker.sock', socketGid: 959, mkcert: '/usr/bin/mkcert', caroot: '/home/u/.local/share/mkcert' })
+
+    expect(compose).toContain('container_name: devproxy-test-watch\n    restart: unless-stopped\n    network_mode: none\n    user: "1000:1000"\n    group_add:\n      - "959"')
+    expect(compose).toContain('command: ["bun", "/pkg/dist/cli.js", "watch", "--state", "/srv/proxy"]')
+    expect(compose).toContain('- /pkg:/pkg:ro\n      - /usr/bin/mkcert:/usr/local/bin/mkcert:ro\n      - /home/u/.local/share/mkcert:/home/u/.local/share/mkcert:ro\n      - /run/docker.sock:/var/run/docker.sock\n')
   })
 })

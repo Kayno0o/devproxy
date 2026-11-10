@@ -2,7 +2,7 @@
 
 import process from 'node:process'
 import { runCli } from '@kaynooo/cli-kit'
-import { downCommand, group, hosts, init, rm, status, upCommand, update } from './commands'
+import { downCommand, group, hosts, init, rm, status, upCommand, update, watchCommand } from './commands'
 
 process.exitCode = await runCli({
   name: 'devproxy',
@@ -17,6 +17,7 @@ process.exitCode = await runCli({
     hosts: { run: hosts, summary: 'every host the proxy serves, with its group and upstream' },
     set: { run: group, summary: 'add or replace a group of routes, read as JSON on stdin or from a file' },
     rm: { run: rm, summary: 'remove a group of routes' },
+    watch: { run: watchCommand, summary: 'keep the routes declared as container labels registered, following docker events' },
     init: { run: init, summary: 'write a starter config' },
   },
 })

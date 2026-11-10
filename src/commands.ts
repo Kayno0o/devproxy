@@ -1,9 +1,10 @@
 import type { Outcome } from './runtime'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import process from 'node:process'
 import { fail, jsonOption, note, ok, parse, printJson, warn } from '@kaynooo/cli-kit'
-import { dropGroup, readGroups, readVerdict, saveGroup } from './apply'
-import { applyAndWait, defaultConfigPath, down, load, running, up } from './runtime'
+import { dropGroup, readGroups, readLabelReport, readSnapshot, readVerdict, saveGroup } from './apply'
+import { applyAndWait, defaultConfigPath, down, load, running, up, watch } from './runtime'
 
 const configOption = { config: { type: 'string', short: 'c', description: `the config file (${'$'}DEVPROXY_CONFIG, else ~/.config/devproxy/config.ts)` } } as const
 
@@ -76,17 +77,41 @@ export async function status(args: string[]): Promise<number> {
   const config = await load(values.config)
   const live = await running(config)
   const verdict = readVerdict(config)
+  const labels = config.labels ? readLabelReport(config) : undefined
 
-  if (values.json === true)
-    printJson({ running: live, verdict: verdict ?? null })
-  else if (!live)
+  if (values.json === true) {
+    printJson({ running: live, verdict: verdict ?? null, labels: labels ?? null })
+
+    return live && verdict?.state !== 'error' ? 0 : 1
+  }
+
+  if (!live)
     note(`${config.name} is not running`)
   else if (verdict?.state === 'error')
     warn(`${config.name} runs on its last good config: nginx refused the current one (${verdict.at.toISOString()})`, verdict.detail)
   else
     ok(`${config.name} runs`, verdict === undefined ? undefined : `${verdict.state} since ${verdict.at.toISOString()}`)
 
+  if (labels !== undefined) {
+    note(`labels: ${labels.groups.join(', ') || 'no stack'} as of ${labels.at}`)
+
+    for (const entry of labels.skipped)
+      warn(`label route skipped on ${entry.container}${entry.host === undefined ? '' : ` (${entry.host})`}`, entry.reason)
+  }
+
   return live && verdict?.state !== 'error' ? 0 : 1
+}
+
+export async function watchCommand(args: string[]): Promise<number> {
+  const { values } = parse(args, 'devproxy watch [--state <dir>]\n\nKeeps one docker-<project> group per running stack from its containers\' devproxy.* labels, following docker events. The watch service `devproxy up` starts runs it with --state, reading the config snapshot there; on the host it reads the config.', { ...configOption, state: { type: 'string', description: 'the state dir holding config.json, instead of the config' } })
+  const config = values.state === undefined ? await load(values.config) : readSnapshot(values.state)
+  const stop = new AbortController()
+
+  process.once('SIGTERM', () => stop.abort())
+  process.once('SIGINT', () => stop.abort())
+  await watch(config, stop.signal)
+
+  return 0
 }
 
 export async function hosts(args: string[]): Promise<number> {

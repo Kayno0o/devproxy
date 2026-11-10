@@ -29,7 +29,7 @@ describe('apply', () => {
   test('writes every file, and nothing on a second run', () => {
     const config = resolved(dir)
 
-    expect(apply(config, certs).changed).toEqual(['certs/main.pem', 'compose.yml', 'entrypoint.sh', 'nginx/nginx.conf', 'nginx/sni.conf', 'nginx/main.conf'])
+    expect(apply(config, certs).changed).toEqual(['certs/main.pem', 'nginx/nginx.conf', 'nginx/sni.conf', 'nginx/main.conf'])
     expect(made).toEqual([['*.tenant.localhost', 'app.localhost', 'docs.localhost', 'localhost', 'site.localhost']])
     expect(apply(config, certs)).toEqual({ changed: [], removed: [] })
     expect(made).toHaveLength(1)

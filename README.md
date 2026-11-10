@@ -18,6 +18,7 @@ export default {
   dir: '~/.local/share/devproxy', // generated nginx config, certificates, logs
   network: 'devproxy',       // the docker network shared with your stacks
   ports: { http: 80, https: 443 },
+  labels: true,              // the watch service, for routes declared as container labels
   routes: [
     { host: 'app.localhost', to: 'http://app:3000', buffering: false },
     { host: 'docs.localhost', to: 'host:5173' },
@@ -38,19 +39,32 @@ export default {
 - `buffering: false` is for server-sent events. `keepaliveRequests`, `locations` and raw `lines` cover the rest.
 - `import { defineConfig } from '@kaynooo/devproxy'` types the file where the package resolves.
 
-A stack joins the network in its own compose file. nginx dials containers by name, so give a service named `nginx` or `php` a unique alias there:
+A stack joins the network in its own compose file. nginx dials containers by name, so a config route to a service named `nginx` or `php` needs a unique alias there.
+
+## Labels
+
+A stack can declare its routes in its own compose file instead, as labels on the service they reach. `docker compose up` registers them within a second and `down` drops them, with no devproxy command:
 
 ```yaml
 services:
+  app:
+    labels:
+      devproxy.web.host: shop.localhost,www.shop.localhost
+      devproxy.web.port: 3000
+      devproxy.web.buffering: false
   nginx:
-    networks:
-      default:
-      devproxy:
-        aliases: [myapp-nginx]
+    labels:
+      devproxy.api.host: api.shop.localhost
+      devproxy.api.passthrough: true
+    networks: [default, devproxy]
 networks:
   devproxy:
     external: true
 ```
+
+- `devproxy.<route>.host` (comma-separated), `.port` (80, or 443 with `passthrough`), `.scheme` (`http` or `https`), `.passthrough`, `.buffering`, `.keepalive`. The upstream is the container itself, so no alias is needed; `.to` names another one instead (`host:5173` for a dev server on this machine).
+- The routes of one compose project form the group `docker-<project>`, which `devproxy hosts` lists. A route whose host is already taken, or whose container is off the network, is left out; `devproxy status` says why.
+- `devproxy up` starts a `watch` service beside nginx that follows docker events. It mounts the docker socket, which grants root on the host the way any docker client does, and runs as your user with your mkcert CA. `labels: false` in the config leaves it out.
 
 ## Commands
 

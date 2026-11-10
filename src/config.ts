@@ -40,6 +40,10 @@ export interface Config {
   network?: string
   ports?: { http?: number, https?: number }
   image?: string
+  // False leaves the watch service out, and with it the routes declared as container labels.
+  labels?: boolean
+  // The image the watch service runs devproxy in.
+  watchImage?: string
   routes?: Route[]
 }
 
@@ -49,6 +53,8 @@ export interface Resolved {
   network: string
   ports: { http: number, https: number }
   image: string
+  labels: boolean
+  watchImage: string
   routes: Route[]
 }
 
@@ -133,6 +139,8 @@ export function resolveConfig(config: Config, configDir: string): Resolved {
     network: config.network ?? 'devproxy',
     ports: { http: config.ports?.http ?? 80, https: config.ports?.https ?? 443 },
     image: config.image ?? 'nginx:alpine',
+    labels: config.labels ?? true,
+    watchImage: config.watchImage ?? 'oven/bun:1.4.4-alpine',
     routes,
   }
 }
