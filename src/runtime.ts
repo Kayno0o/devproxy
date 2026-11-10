@@ -3,9 +3,10 @@ import type { Config, Resolved } from './config'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import process from 'node:process'
-import { captureOutput, compose, composeError, configBase, fail, loadConfig } from '@kaynooo/cli-kit'
+import { captureOutput, compose, composeError, configBase, fail, loadConfig, note } from '@kaynooo/cli-kit'
 import { apply, waitVerdict } from './apply'
 import { resolveConfig } from './config'
+import { locked } from './lock'
 import { paths } from './render'
 
 export const defaultConfigPath = () => process.env.DEVPROXY_CONFIG ?? join(configBase(), 'devproxy', 'config.ts')
@@ -83,19 +84,23 @@ export interface Outcome {
   running: boolean
 }
 
-// Regenerates the files and, when the running proxy has something new to load, waits for its verdict.
-export async function applyAndWait(config: Resolved): Promise<Outcome> {
-  const since = new Date()
-  const { changed, removed } = apply(config, mkcert)
-  const live = await running(config)
+// Runs `change` (a group saved or dropped), regenerates the files and, when the running proxy has something new to load, waits for its verdict; all of it under the state dir's lock.
+export async function applyAndWait(config: Resolved, change?: () => void): Promise<Outcome> {
+  return locked(config.dir, async () => {
+    change?.()
 
-  if (!live || (!changed.length && !removed.length))
-    return { changed, removed, verdict: undefined, running: live }
+    const since = new Date()
+    const { changed, removed } = apply(config, mkcert)
+    const live = await running(config)
 
-  const verdict = await waitVerdict(config, since)
+    if (!live || (!changed.length && !removed.length))
+      return { changed, removed, verdict: undefined, running: live }
 
-  if (verdict === undefined)
-    fail(`the proxy gave no verdict on the new config within 15 s: \`docker logs ${config.name}\` says why`, 1)
+    const verdict = await waitVerdict(config, since)
 
-  return { changed, removed, verdict, running: live }
+    if (verdict === undefined)
+      fail(`the proxy gave no verdict on the new config within 15 s: \`docker logs ${config.name}\` says why`, 1)
+
+    return { changed, removed, verdict, running: live }
+  }, () => note('waiting for another devproxy apply to finish'))
 }

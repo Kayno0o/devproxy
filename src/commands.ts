@@ -7,6 +7,16 @@ import { applyAndWait, defaultConfigPath, down, load, running, up } from './runt
 
 const configOption = { config: { type: 'string', short: 'c', description: `the config file (${'$'}DEVPROXY_CONFIG, else ~/.config/devproxy/config.ts)` } } as const
 
+// A group refused (a bad name or route, a host routed twice) is a usage error.
+function failOnError(change: () => unknown) {
+  try {
+    change()
+  }
+  catch (error) {
+    fail(error instanceof Error ? error.message : String(error))
+  }
+}
+
 function report(outcome: Outcome, json: boolean) {
   if (json) {
     printJson(outcome)
@@ -121,14 +131,7 @@ export async function group(args: string[]): Promise<number> {
 
   const config = await load(values.config)
 
-  try {
-    saveGroup(config, { name, routes })
-  }
-  catch (error) {
-    fail(error instanceof Error ? error.message : String(error))
-  }
-
-  return report(await applyAndWait(config), values.json === true)
+  return report(await applyAndWait(config, () => failOnError(() => saveGroup(config, { name, routes }))), values.json === true)
 }
 
 export async function rm(args: string[]): Promise<number> {
@@ -140,14 +143,7 @@ export async function rm(args: string[]): Promise<number> {
 
   const config = await load(values.config)
 
-  try {
-    dropGroup(config, name)
-  }
-  catch (error) {
-    fail(error instanceof Error ? error.message : String(error))
-  }
-
-  return report(await applyAndWait(config), values.json === true)
+  return report(await applyAndWait(config, () => failOnError(() => dropGroup(config, name))), values.json === true)
 }
 
 // No import: the config sits outside any project, where the package may not resolve; `defineConfig` from @kaynooo/devproxy types one where it does.
