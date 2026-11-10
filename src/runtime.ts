@@ -186,6 +186,11 @@ export const dockerSources = (config: () => Promise<Resolved>): LabelSources => 
 export async function syncLabels(dir: string, sources: LabelSources): Promise<void> {
   await locked(dir, async () => {
     const config = await sources.config()
+
+    // A watcher still running after labels were turned off leaves the groups to the next apply, which drops them.
+    if (!config.labels)
+      return
+
     const others = readGroups(config).filter(group => !isLabelGroup(group.name))
     const { groups, skipped } = labelGroups(config, others, await sources.containers())
 

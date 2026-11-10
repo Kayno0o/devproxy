@@ -75,4 +75,10 @@ describe('render', () => {
     expect(compose).toContain('command: ["bun", "/pkg/dist/cli.js", "watch", "--state", "/srv/proxy"]')
     expect(compose).toContain('- "/pkg:/pkg:ro"\n      - "/usr/bin/mkcert:/usr/local/bin/mkcert:ro"\n      - "/home/u/.local/share/mkcert:/home/u/.local/share/mkcert:ro"\n      - "/run/docker.sock:/var/run/docker.sock"\n')
   })
+
+  test('a dollar in a path is doubled, so compose keeps it literal', () => {
+    const compose = renderCompose(config, { entry: '/pkg/dist/cli.js', root: '/pkg', uid: 1000, gid: 1000, socket: '/run/docker.sock', socketGid: 959, mkcert: '/usr/bin/mkcert', caroot: '/home/u/$ca' })
+
+    expect(compose).toContain('- "/home/u/$$ca:/home/u/$$ca:ro"')
+  })
 })

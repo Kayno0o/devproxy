@@ -61,7 +61,6 @@ export interface Resolved {
 export const defineConfig = (config: Config): Config => config
 
 const HOST = /^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
-const NAME = /^[a-z0-9][\w.-]*$/
 
 // A group names files, so it never holds a slash.
 export const GROUP_NAME = /^[a-z0-9][\w.-]*$/
@@ -128,7 +127,7 @@ const expandHome = (path: string) => path === '~' || path.startsWith('~/') ? hom
 export function resolveConfig(config: Config, configDir: string): Resolved {
   const name = config.name ?? 'devproxy'
 
-  if (!NAME.test(name))
+  if (!GROUP_NAME.test(name))
     throw new Error(`name ${name} is not a valid compose project name`)
 
   const dir = expandHome(config.dir)

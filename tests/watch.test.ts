@@ -51,6 +51,13 @@ describe('syncLabels', () => {
     expect(readLabelReport(config)).toMatchObject({ groups: ['docker-shop'], skipped: [] })
   })
 
+  test('writes no group once labels are turned off', async () => {
+    writeSnapshot({ ...resolved(dir), labels: false })
+    await syncLabels(dir, sources(async () => [shop]))
+
+    expect(existsSync(join(dir, 'groups/docker-shop.json'))).toBe(false)
+  })
+
   test('finishes a pass that wrote the groups but not nginx\'s files', async () => {
     writeSnapshot(resolved(dir))
     await syncLabels(dir, sources(async () => [shop]))
