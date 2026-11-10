@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { fail, jsonOption, note, ok, parse, printJson, warn } from '@kaynooo/cli-kit'
 import { dropGroup, readGroups, readLabelReport, readSnapshot, readVerdict, saveGroup } from './apply'
-import { applyAndWait, defaultConfigPath, down, load, running, up, watch } from './runtime'
+import { applyAndWait, defaultConfigPath, dockerSources, down, load, running, up, watch } from './runtime'
 
 const configOption = { config: { type: 'string', short: 'c', description: `the config file (${'$'}DEVPROXY_CONFIG, else ~/.config/devproxy/config.ts)` } } as const
 
@@ -50,14 +50,14 @@ function report(outcome: Outcome, json: boolean) {
 export async function update(args: string[]): Promise<number> {
   const { values } = parse(args, 'devproxy apply\n\nGenerates nginx.conf, the SNI map, the vhosts, the compose file and the certificates again from the config and the groups, then waits for the running proxy to test and load them.\n\nExits 0 when nginx accepted them or the proxy is not running, 1 when nginx refused them.', { ...configOption, json: jsonOption('{changed, removed, verdict, running}') })
 
-  return report(await applyAndWait(await load(values.config)), values.json === true)
+  return report(await applyAndWait(await load(values.config), { runtime: true }), values.json === true)
 }
 
 export async function upCommand(args: string[]): Promise<number> {
   const { values } = parse(args, 'devproxy up\n\nGenerates everything from the config, creates the docker network when missing and starts the proxy container.', configOption)
   const config = await load(values.config)
 
-  await applyAndWait(config)
+  await applyAndWait(config, { runtime: true })
   await up(config)
   ok(`${config.name} is up on ${config.ports.http} and ${config.ports.https}`)
 
@@ -104,12 +104,15 @@ export async function status(args: string[]): Promise<number> {
 
 export async function watchCommand(args: string[]): Promise<number> {
   const { values } = parse(args, 'devproxy watch [--state <dir>]\n\nKeeps one docker-<project> group per running stack from its containers\' devproxy.* labels, following docker events. The watch service `devproxy up` starts runs it with --state, reading the config snapshot there; on the host it reads the config.', { ...configOption, state: { type: 'string', description: 'the state dir holding config.json, instead of the config' } })
-  const config = values.state === undefined ? await load(values.config) : readSnapshot(values.state)
+  const { state } = values
+  const dir = state ?? (await load(values.config)).dir
+  // eslint-disable-next-line ts/require-await -- the loader is async by contract, the snapshot is read synchronously
+  const config = state === undefined ? async () => load(values.config) : async () => readSnapshot(state)
   const stop = new AbortController()
 
   process.once('SIGTERM', () => stop.abort())
   process.once('SIGINT', () => stop.abort())
-  await watch(config, stop.signal)
+  await watch(dir, dockerSources(config), stop.signal)
 
   return 0
 }
@@ -156,7 +159,7 @@ export async function group(args: string[]): Promise<number> {
 
   const config = await load(values.config)
 
-  return report(await applyAndWait(config, () => failOnError(() => saveGroup(config, { name, routes }))), values.json === true)
+  return report(await applyAndWait(config, { change: () => failOnError(() => saveGroup(config, { name, routes })) }), values.json === true)
 }
 
 export async function rm(args: string[]): Promise<number> {
@@ -168,7 +171,7 @@ export async function rm(args: string[]): Promise<number> {
 
   const config = await load(values.config)
 
-  return report(await applyAndWait(config, () => failOnError(() => dropGroup(config, name))), values.json === true)
+  return report(await applyAndWait(config, { change: () => failOnError(() => dropGroup(config, name)) }), values.json === true)
 }
 
 // No import: the config sits outside any project, where the package may not resolve; `defineConfig` from @kaynooo/devproxy types one where it does.

@@ -62,6 +62,9 @@ export const defineConfig = (config: Config): Config => config
 
 const HOST = /^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 const NAME = /^[a-z0-9][\w.-]*$/
+
+// A group names files, so it never holds a slash.
+export const GROUP_NAME = /^[a-z0-9][\w.-]*$/
 const PASSTHROUGH_TARGET = /^[\w.-]+:\d+$/
 const HOST_PORT = /^host:(\d+)$/
 

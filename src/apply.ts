@@ -3,14 +3,12 @@ import type { Skipped } from './labels'
 import type { Group, Watcher } from './render'
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { checkRoutes } from './config'
+import { checkRoutes, GROUP_NAME } from './config'
 import entrypoint from './entrypoint.sh' with { type: 'text' }
 import { LABEL_GROUP } from './labels'
 import { certHosts, MAIN, paths, renderCompose, renderGroupSni, renderHttp, renderNginx, renderSni } from './render'
 
 export const isLabelGroup = (name: string) => name.startsWith(LABEL_GROUP)
-
-const GROUP_NAME = /^[a-z0-9][\w.-]*$/
 
 // The groups other tools registered, one JSON file each under groups/.
 export function readGroups(config: Resolved): Group[] {
@@ -27,18 +25,20 @@ export function readGroups(config: Resolved): Group[] {
 
 // Groups named docker-* belong to the watch service, which rewrites them from the containers' labels.
 export function checkGroupName(name: string) {
-  if (!GROUP_NAME.test(name) || name === MAIN || name.startsWith(LABEL_GROUP))
+  if (!GROUP_NAME.test(name) || name === MAIN || isLabelGroup(name))
     throw new Error(`${name} is not a group name: letters, digits, dot, dash and underscore, neither "${MAIN}" nor starting with "${LABEL_GROUP}"`)
 }
 
 const groupFile = (config: Resolved, name: string) => join(config.dir, 'groups', `${name}.json`)
+
+const groupText = (group: Group) => `${JSON.stringify({ routes: group.routes }, null, 2)}\n`
 
 // Renamed into place, so an apply running beside it never reads half a file.
 function writeGroup(config: Resolved, group: Group) {
   const file = groupFile(config, group.name)
 
   mkdirSync(dirname(file), { recursive: true })
-  writeFileSync(`${file}.tmp`, `${JSON.stringify({ routes: group.routes }, null, 2)}\n`)
+  writeFileSync(`${file}.tmp`, groupText(group))
   renameSync(`${file}.tmp`, file)
 }
 
@@ -167,10 +167,13 @@ export function apply(config: Resolved, certs: Certs): Applied {
   return { changed, removed }
 }
 
-// The files only the host writes, since they hold its paths: the compose file and the nginx entrypoint, which take effect on `devproxy up`, and the snapshot of the config the watch service reads.
-export function writeRuntime(config: Resolved, watcher: Watcher | undefined): string[] {
+// The config as the watch service reads it, written by every apply on the host so the service never syncs against routes that changed since.
+export function writeSnapshot(config: Resolved) {
   write(join(config.dir, paths.snapshot), `${JSON.stringify(config, null, 2)}\n`)
+}
 
+// The files only the host writes, since they hold its paths, and that take effect on `devproxy up`: the compose file and the nginx entrypoint.
+export function writeRuntime(config: Resolved, watcher: Watcher | undefined): string[] {
   return ([[paths.compose, renderCompose(config, watcher)], [paths.entrypoint, entrypoint]] as const).filter(([path, content]) => write(join(config.dir, path), content)).map(([path]) => path)
 }
 
@@ -189,12 +192,12 @@ export interface LabelReport {
   skipped: Skipped[]
 }
 
-// Replaces the docker-* groups with these, and records what was left out for `devproxy status`; true when a group changed.
-export function syncLabelGroups(config: Resolved, groups: Group[], skipped: Skipped[]): boolean {
-  const wanted = new Map(groups.map(group => [group.name, `${JSON.stringify({ routes: group.routes }, null, 2)}\n`]))
+// Replaces the docker-* groups with these; true when one changed.
+export function syncLabelGroups(config: Resolved, groups: Group[]): boolean {
+  const wanted = new Map(groups.map(group => [group.name, groupText(group)]))
   let changed = false
 
-  for (const group of readGroups(config).filter(group => group.name.startsWith(LABEL_GROUP) && !wanted.has(group.name))) {
+  for (const group of readGroups(config).filter(group => isLabelGroup(group.name) && !wanted.has(group.name))) {
     rmSync(groupFile(config, group.name))
     changed = true
   }
@@ -209,9 +212,12 @@ export function syncLabelGroups(config: Resolved, groups: Group[], skipped: Skip
     changed = true
   }
 
-  write(join(config.dir, paths.labels), `${JSON.stringify({ at: new Date().toISOString(), groups: [...wanted.keys()], skipped } satisfies LabelReport, null, 2)}\n`)
-
   return changed
+}
+
+// What the last sync kept and left out, for `devproxy status`.
+export function writeLabelReport(config: Resolved, groups: Group[], skipped: Skipped[]) {
+  write(join(config.dir, paths.labels), `${JSON.stringify({ at: new Date().toISOString(), groups: groups.map(group => group.name), skipped } satisfies LabelReport, null, 2)}\n`)
 }
 
 export function readLabelReport(config: Resolved): LabelReport | undefined {

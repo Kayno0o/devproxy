@@ -19,6 +19,7 @@ export default {
   network: 'devproxy',       // the docker network shared with your stacks
   ports: { http: 80, https: 443 },
   labels: true,              // the watch service, for routes declared as container labels
+  watchImage: 'oven/bun:1.4.4-alpine', // the image it runs devproxy in
   routes: [
     { host: 'app.localhost', to: 'http://app:3000', buffering: false },
     { host: 'docs.localhost', to: 'host:5173' },
@@ -64,7 +65,7 @@ networks:
 
 - `devproxy.<route>.host` (comma-separated), `.port` (80, or 443 with `passthrough`), `.scheme` (`http` or `https`), `.passthrough`, `.buffering`, `.keepalive`. The upstream is the container itself, so no alias is needed; `.to` names another one instead (`host:5173` for a dev server on this machine).
 - The routes of one compose project form the group `docker-<project>`, which `devproxy hosts` lists. A route whose host is already taken, or whose container is off the network, is left out; `devproxy status` says why.
-- `devproxy up` starts a `watch` service beside nginx that follows docker events. It mounts the docker socket, which grants root on the host the way any docker client does, and runs as your user with your mkcert CA. `labels: false` in the config leaves it out.
+- `devproxy up` starts a `watch` service beside nginx that follows docker events. It mounts the docker socket, which grants root on the host the way any docker client does, and runs as your user with your mkcert CA. `labels: false` in the config leaves it out, and the next `devproxy apply` drops the routes it had registered.
 
 ## Commands
 

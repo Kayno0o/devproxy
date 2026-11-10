@@ -1,6 +1,6 @@
 import type { Resolved, Route } from './config'
 import type { Group } from './render'
-import { checkRoutes } from './config'
+import { checkRoutes, GROUP_NAME } from './config'
 
 // What devproxy needs to know of a running container.
 export interface Container {
@@ -71,7 +71,7 @@ function parse(container: Container, network: string, fields: Map<string, string
   if (!hosts.length)
     throw new Error('no host label')
 
-  if (port !== undefined && !PORT.test(port))
+  if (port !== undefined && (!PORT.test(port) || Number(port) < 1 || Number(port) > 65_535))
     throw new Error(`port ${port} is not a port number`)
 
   if (scheme !== undefined && scheme !== 'http' && scheme !== 'https')
@@ -113,7 +113,15 @@ export function labelGroups(config: Resolved, others: Group[], containers: Conta
   const groups = new Map<string, Route[]>()
 
   for (const container of [...containers].sort((a, b) => a.name.localeCompare(b.name))) {
-    for (const [name, fields] of byRoute(container, skipped)) {
+    const named = byRoute(container, skipped)
+
+    if (named.size && !GROUP_NAME.test(groupOf(container))) {
+      skipped.push({ container: container.name, host: undefined, reason: `${groupOf(container)} is not a usable group name` })
+
+      continue
+    }
+
+    for (const [name, fields] of named) {
       let routes: Route[]
 
       try {

@@ -59,6 +59,18 @@ describe('devproxy', () => {
     expect(existsSync(join(home, 'state/nginx/sni/wt-x.conf'))).toBe(false)
   })
 
+  test('apply with labels off drops the groups the watch service left', () => {
+    const config = join(home, 'proxy.ts')
+
+    writeFileSync(config, `export default { dir: './state', labels: false }\n`)
+    Bun.spawnSync(['mkdir', '-p', join(home, 'state/groups')])
+    writeFileSync(join(home, 'state/groups/docker-shop.json'), JSON.stringify({ routes: [{ host: 'shop.localhost', to: 'http://shop:80' }] }))
+
+    expect(devproxy(['apply', '-c', config]).code).toBe(0)
+    expect(existsSync(join(home, 'state/groups/docker-shop.json'))).toBe(false)
+    expect(readFileSync(join(home, 'state/compose.yml'), 'utf8')).not.toContain('watch:')
+  })
+
   test('set refuses invalid routes with a usage error and registers nothing', () => {
     const config = join(home, 'proxy.ts')
 

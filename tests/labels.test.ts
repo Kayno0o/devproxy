@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { readGroups, readLabelReport, saveGroup, syncLabelGroups } from '../src/apply'
+import { readGroups, saveGroup, syncLabelGroups } from '../src/apply'
 import { labelGroups } from '../src/labels'
 import { resolved } from './fixtures'
 
@@ -80,20 +80,44 @@ describe('labelGroups', () => {
       'off off.localhost: route web: the container is not on the devproxy-test network, so the proxy cannot reach it',
     ])
   })
+
+  test.each([
+    [{ 'devproxy.web.port': '80' }, 'route web: no host label'],
+    [{ 'devproxy.web.host': 'w.localhost', 'devproxy.web.port': '0' }, 'port 0 is not a port number'],
+    [{ 'devproxy.web.host': 'w.localhost', 'devproxy.web.port': '65536' }, 'port 65536 is not a port number'],
+    [{ 'devproxy.web.host': 'w.localhost', 'devproxy.web.scheme': 'ftp' }, 'scheme ftp is not http or https'],
+    [{ 'devproxy.web.host': 'w.localhost', 'devproxy.web.keepalive': 'lots' }, 'keepalive lots is not a number'],
+    [{ 'devproxy.web.host': 'w.localhost', 'devproxy.web.buffering': 'off' }, 'buffering is off, not true or false'],
+    [{ 'devproxy.web.host': 'w.localhost', 'devproxy.web.passthrough': 'true', 'devproxy.web.scheme': 'https' }, 'a passthrough route forwards TLS as is, so it takes no scheme'],
+    [{ 'devproxy.web.host': 'W.localhost' }, 'W.localhost is not a host name'],
+    [{ 'devproxy.web.host.extra': 'w.localhost' }, 'label devproxy.web.host.extra is not devproxy.<route>.'],
+    [{ 'devproxy.we/b.host': 'w.localhost' }, 'label devproxy.we/b.host is not devproxy.<route>.'],
+  ])('skips %o', (labels, reason) => {
+    const { groups, skipped } = labelGroups(resolved(dir), [], [container('a', labels)])
+
+    expect(groups).toEqual([])
+    expect(skipped).toHaveLength(1)
+    expect(skipped[0]!.reason).toContain(reason)
+  })
+
+  test('a compose project that cannot name a group file is skipped whole', () => {
+    const { groups, skipped } = labelGroups(resolved(dir), [], [container('a', { 'devproxy.web.host': 'w.localhost' }, { project: '../escape' })])
+
+    expect(groups).toEqual([])
+    expect(skipped).toEqual([{ container: 'a', host: undefined, reason: 'docker-../escape is not a usable group name' }])
+  })
 })
 
 describe('syncLabelGroups', () => {
-  test('replaces the docker groups only, and records what was skipped', () => {
+  test('replaces the docker groups only', () => {
     const config = resolved(dir)
 
     saveGroup(config, { name: 'wt-x', routes: [{ host: 'x.localhost', to: 'http://x:1' }] })
 
-    expect(syncLabelGroups(config, [{ name: 'docker-a', routes: [{ host: 'a.localhost', to: 'http://a:80' }] }], [])).toBe(true)
-    expect(syncLabelGroups(config, [{ name: 'docker-a', routes: [{ host: 'a.localhost', to: 'http://a:80' }] }], [])).toBe(false)
-    expect(syncLabelGroups(config, [], [{ container: 'b', host: 'b.localhost', reason: 'why' }])).toBe(true)
-
+    expect(syncLabelGroups(config, [{ name: 'docker-a', routes: [{ host: 'a.localhost', to: 'http://a:80' }] }])).toBe(true)
+    expect(syncLabelGroups(config, [{ name: 'docker-a', routes: [{ host: 'a.localhost', to: 'http://a:80' }] }])).toBe(false)
+    expect(syncLabelGroups(config, [])).toBe(true)
     expect(readGroups(config).map(group => group.name)).toEqual(['wt-x'])
-    expect(readLabelReport(config)).toMatchObject({ groups: [], skipped: [{ container: 'b', host: 'b.localhost', reason: 'why' }] })
   })
 
   test('devproxy set may not take a docker- group', () => {

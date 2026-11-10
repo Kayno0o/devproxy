@@ -1,11 +1,12 @@
 import type { Certs, Verdict } from './apply'
 import type { Config, Resolved } from './config'
+import type { Container } from './labels'
 import type { Watcher } from './render'
 import { existsSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
 import { captureOutput, compose, composeError, configBase, fail, loadConfig, note } from '@kaynooo/cli-kit'
-import { apply, isLabelGroup, readGroups, syncLabelGroups, waitVerdict, writeRuntime } from './apply'
+import { apply, isLabelGroup, readGroups, syncLabelGroups, waitVerdict, writeLabelReport, writeRuntime, writeSnapshot } from './apply'
 import { resolveConfig } from './config'
 import { dockerSocket, followEvents, runningContainers } from './docker'
 import { labelGroups } from './labels'
@@ -125,16 +126,30 @@ export interface Outcome {
   running: boolean
 }
 
-// Runs `change` (a group saved or dropped), regenerates the files and, when the running proxy has something new to load, waits for its verdict; all of it under the state dir's lock.
-export async function applyAndWait(config: Resolved, change?: () => void): Promise<Outcome> {
+interface ApplyOptions {
+  // A group saved or dropped, run under the lock.
+  change?: () => void
+  // Writes the compose file and the entrypoint too, which only `up` and `apply` need, and which take mkcert's paths for the watch service.
+  runtime?: boolean
+}
+
+// Runs the change, regenerates the files and, when the running proxy has something new to load, waits for its verdict; all of it under the state dir's lock.
+export async function applyAndWait(config: Resolved, { change, runtime = false }: ApplyOptions = {}): Promise<Outcome> {
   return locked(config.dir, async () => {
     change?.()
 
+    // With labels off, the groups the watch service left behind would be served for good.
+    if (!config.labels)
+      syncLabelGroups(config, [])
+
     const since = new Date()
-    const runtime = writeRuntime(config, watcherOf(config))
+    const written = runtime ? writeRuntime(config, watcherOf(config)) : []
+
+    writeSnapshot(config)
+
     const { changed, removed } = apply(config, mkcert)
 
-    changed.unshift(...runtime)
+    changed.unshift(...written)
     const live = await running(config)
 
     if (!live || (!changed.length && !removed.length))
@@ -154,50 +169,68 @@ const RETRY_MS = 2000
 
 const log = (message: string) => console.log(`${new Date().toISOString()} ${message}`)
 
-// One pass of the watch service: the labels of the running containers become the docker-* groups, then nginx's files are made again and its verdict logged.
-export async function syncLabels(config: Resolved): Promise<void> {
-  await locked(config.dir, async () => {
+export interface LabelSources {
+  // Read again on every pass, so a route the host applied since is never undone.
+  config: () => Promise<Resolved>
+  containers: () => Promise<Container[]>
+  // Calls `changed` on every event until the stream ends.
+  events: (changed: () => void, signal?: AbortSignal) => Promise<void>
+  certs: Certs
+  verdictMs?: number
+  retryMs?: number
+}
+
+export const dockerSources = (config: () => Promise<Resolved>): LabelSources => ({ config, containers: runningContainers, events: followEvents, certs: mkcert })
+
+// One pass of the watch service: the labels of the running containers become the docker-* groups, then nginx's files are made again and its verdict logged. Apply runs even when no group changed, so a pass that failed halfway is finished by the next.
+export async function syncLabels(dir: string, sources: LabelSources): Promise<void> {
+  await locked(dir, async () => {
+    const config = await sources.config()
     const others = readGroups(config).filter(group => !isLabelGroup(group.name))
-    const { groups, skipped } = labelGroups(config, others, await runningContainers())
+    const { groups, skipped } = labelGroups(config, others, await sources.containers())
 
     for (const entry of skipped)
       log(`skipped ${entry.host ?? ''} on ${entry.container}: ${entry.reason}`)
 
-    if (!syncLabelGroups(config, groups, skipped))
-      return
+    syncLabelGroups(config, groups)
+    writeLabelReport(config, groups, skipped)
 
     const since = new Date()
-    const { changed, removed } = apply(config, mkcert)
-
-    log(`groups ${groups.map(group => group.name).join(' ') || 'none'}: ${changed.length} written, ${removed.length} removed`)
+    const { changed, removed } = apply(config, sources.certs)
 
     if (!changed.length && !removed.length)
       return
 
-    const verdict = await waitVerdict(config, since)
+    log(`groups ${groups.map(group => group.name).join(' ') || 'none'}: ${changed.length} written, ${removed.length} removed`)
+
+    const verdict = await waitVerdict(config, since, sources.verdictMs)
 
     log(verdict === undefined ? 'no verdict from nginx yet, is the proxy running?' : `nginx: ${verdict.state}${verdict.detail ? `\n${verdict.detail}` : ''}`)
   })
 }
 
 // Syncs once, then again a moment after every burst of container events; a lost event stream is followed again after a full sync, so nothing missed meanwhile stays stale.
-export async function watch(config: Resolved, signal?: AbortSignal): Promise<void> {
+export async function watch(dir: string, sources: LabelSources, signal?: AbortSignal): Promise<void> {
   let timer: Timer | undefined
   let draining: Promise<void> | undefined
   let again = false
+  const stopped = () => signal?.aborted === true
+  const retryMs = sources.retryMs ?? RETRY_MS
 
-  // Events landing during a sync ask for one more pass, never for a second sync beside it.
+  // Events landing during a sync ask for one more pass, never for a second sync beside it; a failed pass is tried again, since no event may come to retry it.
   const drain = async () => {
     do {
       again = false
 
       try {
-        await syncLabels(config)
+        await syncLabels(dir, sources)
       }
       catch (error) {
-        log(`sync failed: ${error instanceof Error ? error.message : String(error)}`)
+        log(`sync failed, trying again in ${retryMs / 1000} s: ${error instanceof Error ? error.message : String(error)}`)
+        await Bun.sleep(retryMs)
+        again = true
       }
-    } while (again)
+    } while (again && !stopped())
 
     draining = undefined
   }
@@ -209,15 +242,13 @@ export async function watch(config: Resolved, signal?: AbortSignal): Promise<voi
     }, DEBOUNCE_MS)
   }
 
-  const stopped = () => signal?.aborted === true
-
-  log(`watching the labels of containers on ${config.network}`)
+  log(`watching the labels of the containers devproxy reaches, state in ${dir}`)
 
   while (!stopped()) {
     schedule()
 
     try {
-      await followEvents(schedule, signal)
+      await sources.events(schedule, signal)
       log('the docker event stream ended, following it again')
     }
     catch (error) {
@@ -227,7 +258,8 @@ export async function watch(config: Resolved, signal?: AbortSignal): Promise<voi
       log(`docker events: ${error instanceof Error ? error.message : String(error)}`)
     }
 
-    await Bun.sleep(RETRY_MS)
+    if (!stopped())
+      await Bun.sleep(retryMs)
   }
 
   clearTimeout(timer)

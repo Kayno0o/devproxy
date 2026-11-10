@@ -73,6 +73,6 @@ describe('render', () => {
 
     expect(compose).toContain('container_name: devproxy-test-watch\n    restart: unless-stopped\n    network_mode: none\n    user: "1000:1000"\n    group_add:\n      - "959"')
     expect(compose).toContain('command: ["bun", "/pkg/dist/cli.js", "watch", "--state", "/srv/proxy"]')
-    expect(compose).toContain('- /pkg:/pkg:ro\n      - /usr/bin/mkcert:/usr/local/bin/mkcert:ro\n      - /home/u/.local/share/mkcert:/home/u/.local/share/mkcert:ro\n      - /run/docker.sock:/var/run/docker.sock\n')
+    expect(compose).toContain('- "/pkg:/pkg:ro"\n      - "/usr/bin/mkcert:/usr/local/bin/mkcert:ro"\n      - "/home/u/.local/share/mkcert:/home/u/.local/share/mkcert:ro"\n      - "/run/docker.sock:/var/run/docker.sock"\n')
   })
 })
