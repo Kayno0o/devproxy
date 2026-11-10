@@ -1,0 +1,44 @@
+{
+  "name": "@kaynooo/devproxy",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "A local HTTPS reverse proxy for docker compose stacks: nginx and mkcert, every route generated from one config file.",
+  "author": "Kaynooo <contact@kaynooo.fr>",
+  "license": "MIT",
+  "homepage": "https://git.kaynooo.fr/kaynooo/devproxy#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://git.kaynooo.fr/kaynooo/devproxy.git"
+  },
+  "bugs": "https://git.kaynooo.fr/kaynooo/devproxy/issues",
+  "keywords": ["nginx", "proxy", "docker", "compose", "mkcert", "https", "cli", "bun"],
+  "exports": {
+    ".": "./src/config.ts"
+  },
+  "bin": {
+    "devproxy": "./dist/cli.js"
+  },
+  "files": ["dist", "src/config.ts"],
+  "engines": {
+    "bun": ">=1.4.3"
+  },
+  "publishConfig": {
+    "registry": "https://git.kaynooo.fr/api/packages/kaynooo/npm/"
+  },
+  "scripts": {
+    "build": "$npm_execpath build src/cli.ts --target bun --outdir dist",
+    "check": "$npm_execpath node_modules/typescript-7/bin/tsc --noEmit",
+    "lint": "keslint --cache",
+    "lint:fix": "keslint --fix --cache",
+    "test": "$npm_execpath test"
+  },
+  "dependencies": {
+    "@kaynooo/cli-kit": "0.41.0"
+  },
+  "devDependencies": {
+    "@kaynooo/eslint": "7.1.6",
+    "@types/bun": "^1.4.4",
+    "typescript": "^6.0.3",
+    "typescript-7": "npm:typescript@^7.0.2"
+  }
+}

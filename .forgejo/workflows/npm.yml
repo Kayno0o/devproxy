@@ -1,0 +1,25 @@
+name: Publish
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# `ft release` waits for the Tests run on main before it tags, so the tests are not run again here.
+jobs:
+  publish:
+    runs-on: alpine
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: https://git.kaynooo.fr/kaynooo/actions/setup-bun@v1
+
+      # The .npmrc maps @kaynooo to git.kaynooo.fr and bun publish follows it, so the token is written for that host.
+      - uses: https://git.kaynooo.fr/kaynooo/actions/npm-publish@v1
+        with:
+          server: https://git.kaynooo.fr
+          token: ${{ secrets.PACKAGE_TOKEN }}
