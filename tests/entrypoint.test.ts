@@ -13,7 +13,8 @@ const dir = mkdtempSync(join(tmpdir(), 'devproxy-entrypoint-'))
 const container = `devproxy-entrypoint-test-${process.pid}`
 
 afterAll(() => {
-  Bun.spawnSync(['docker', 'rm', '-f', container], { stdout: 'ignore', stderr: 'ignore' })
+  if (usable)
+    Bun.spawnSync(['docker', 'rm', '-f', container], { stdout: 'ignore', stderr: 'ignore' })
   rmSync(dir, { recursive: true, force: true })
 })
 
