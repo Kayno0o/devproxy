@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { fail, jsonOption, note, ok, parse, printJson, warn } from '@kaynooo/cli-kit'
-import { dropGroup, readGroups, readLabelReport, readSnapshot, readVerdict, saveGroup } from './apply'
+import { dropGroup, readGroups, readLabelReport, readSnapshot, readVerdict, saveGroup, waitVerdict } from './apply'
 import { applyAndWait, defaultConfigPath, dockerSources, down, load, running, up, watch } from './runtime'
 
 const configOption = { config: { type: 'string', short: 'c', description: `the config file (${'$'}DEVPROXY_CONFIG, else ~/.config/devproxy/config.ts)` } } as const
@@ -54,11 +54,26 @@ export async function update(args: string[]): Promise<number> {
 }
 
 export async function upCommand(args: string[]): Promise<number> {
-  const { values } = parse(args, 'devproxy up\n\nGenerates everything from the config, creates the docker network when missing and starts the proxy container.', configOption)
+  const { values } = parse(args, 'devproxy up\n\nGenerates everything from the config, creates the docker network when missing and starts the proxy container, then waits for nginx to test the config.\n\nExits 1 when nginx refuses it.', configOption)
   const config = await load(values.config)
 
-  await applyAndWait(config, { runtime: true })
+  const outcome = await applyAndWait(config, { runtime: true })
+  const since = new Date()
+
   await up(config)
+
+  // A proxy that was stopped tests its config as it starts; a running one already gave its verdict, or kept its last one when nothing changed.
+  const verdict = outcome.running ? outcome.verdict ?? readVerdict(config) : await waitVerdict(config, since)
+
+  if (verdict === undefined)
+    fail(`the proxy gave no verdict on its config within 15 s: \`docker logs ${config.name}\` says why`, 1)
+
+  if (verdict.state === 'error') {
+    warn(outcome.running ? 'nginx refused the new config and keeps serving the last one it accepted' : 'nginx refused the config, so the proxy serves nothing until it is fixed', verdict.detail)
+
+    return 1
+  }
+
   ok(`${config.name} is up on ${config.ports.http} and ${config.ports.https}`)
 
   return 0

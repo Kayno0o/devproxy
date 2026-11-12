@@ -71,6 +71,38 @@ describe('devproxy', () => {
     expect(readFileSync(join(home, 'state/compose.yml'), 'utf8')).not.toContain('watch:')
   })
 
+  // A docker whose proxy is stopped, and whose `compose up` starts one that writes the given verdict, as the entrypoint does.
+  function dockerStartingWith(verdict: string) {
+    const status = join(home, 'state/nginx/.status')
+
+    writeFileSync(join(home, 'bin/docker'), `#!/bin/sh\ncase "$1" in\n  inspect) [ "$2" = network ] || echo false;;\n  compose) printf '%s\\n' '${verdict}' > '${status}';;\nesac\n`, { mode: 0o755 })
+  }
+
+  test('up exits 1 when nginx refuses the config it starts on', () => {
+    const config = join(home, 'proxy.ts')
+
+    writeFileSync(config, `export default { dir: './state', labels: false }\n`)
+    dockerStartingWith('error 2026-01-01T00:00:00Z\nunknown directive "bogus"')
+
+    const run = devproxy(['up', '-c', config])
+
+    expect(run.code).toBe(1)
+    expect(run.err).toContain('unknown directive "bogus"')
+    expect(run.out).not.toContain('is up')
+  })
+
+  test('up says the proxy is up once nginx accepts the config', () => {
+    const config = join(home, 'proxy.ts')
+
+    writeFileSync(config, `export default { dir: './state', labels: false }\n`)
+    dockerStartingWith('ok 2026-01-01T00:00:00Z')
+
+    const run = devproxy(['up', '-c', config])
+
+    expect(run.code).toBe(0)
+    expect(run.out).toContain('is up on 80 and 443')
+  })
+
   test('set refuses invalid routes with a usage error and registers nothing', () => {
     const config = join(home, 'proxy.ts')
 
