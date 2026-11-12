@@ -7,8 +7,8 @@ const CLI = new URL('../src/cli.ts', import.meta.url).pathname
 let home: string
 
 // PATH holds only bun's folder, so no docker answers and the proxy reads as not running unless a test writes a docker stub; mkcert is a stub writing placeholder files.
-function devproxy(args: string[], stdin?: string) {
-  const env = { HOME: home, XDG_CONFIG_HOME: join(home, '.config'), PATH: `${join(home, 'bin')}:${process.execPath.replace(/\/[^/]+$/, '')}` }
+function devproxy(args: string[], stdin?: string, extraEnv: Record<string, string> = {}) {
+  const env = { HOME: home, XDG_CONFIG_HOME: join(home, '.config'), PATH: `${join(home, 'bin')}:${process.execPath.replace(/\/[^/]+$/, '')}`, ...extraEnv }
   const run = Bun.spawnSync([process.execPath, CLI, ...args], { env, stdin: stdin === undefined ? 'ignore' : Buffer.from(stdin), stdout: 'pipe', stderr: 'pipe' })
 
   return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() }
@@ -119,6 +119,19 @@ describe('devproxy', () => {
     expect(run.code).toBe(1)
     expect(run.err).toContain('keeps serving the last one it accepted')
     expect(run.err).toContain('unknown directive "bogus"')
+  })
+
+  test('up names its own compose project, so a COMPOSE_PROJECT_NAME from the caller cannot point compose elsewhere', () => {
+    const config = join(home, 'proxy.ts')
+    const calls = join(home, 'compose-calls')
+
+    writeFileSync(config, `export default { dir: './state', name: 'test-proxy', labels: false }\n`)
+    const status = join(home, 'state/nginx/.status')
+
+    writeFileSync(join(home, 'bin/docker'), `#!/bin/sh\ncase "$1" in\n  inspect) [ "$2" = network ] || echo false;;\n  compose) echo "$@" >> '${calls}'; printf 'ok 2026-01-01T00:00:00Z\\n' > '${status}';;\nesac\n`, { mode: 0o755 })
+
+    expect(devproxy(['up', '-c', config], undefined, { COMPOSE_PROJECT_NAME: 'shop--feature' }).code).toBe(0)
+    expect(readFileSync(calls, 'utf8')).toContain('compose -p test-proxy -f ')
   })
 
   test('up after a ports change waits for the recreated proxy, not for nginx to answer a compose file it never reads', () => {

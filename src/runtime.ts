@@ -81,7 +81,8 @@ export const mkcert: Certs = {
   },
 }
 
-const composeFlags = (config: Resolved) => ['-f', join(config.dir, paths.compose)]
+// `-p` beats a COMPOSE_PROJECT_NAME the caller's environment carries (a stack's .env), which would hide the running proxy from compose.
+const composeFlags = (config: Resolved) => ['-p', config.name, '-f', join(config.dir, paths.compose)]
 
 export async function running(config: Resolved): Promise<boolean> {
   if (Bun.which('docker') === null)
