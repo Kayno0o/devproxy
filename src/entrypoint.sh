@@ -12,9 +12,10 @@ report() {
   printf '%s %s\n%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" > "$STATUS"
 }
 
+# Hashes the contents: size and an mtime in whole seconds miss two same-size writes within one second.
 fingerprint() {
-  find "$ROOT" -type f \( -name '*.conf' -o -name '.reload' \) -exec stat -c '%n %s %Y' {} + 2>/dev/null | sort
-  find "$ROOT/../certs" -type f -name '*.pem' -exec stat -c '%n %s %Y' {} + 2>/dev/null | sort
+  find "$ROOT" -type f \( -name '*.conf' -o -name '.reload' \) -exec md5sum {} + 2>/dev/null | sort
+  find "$ROOT/../certs" -type f -name '*.pem' -exec md5sum {} + 2>/dev/null | sort
 }
 
 while [ ! -f "$CONF" ]; do
