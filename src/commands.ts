@@ -71,7 +71,7 @@ export async function upCommand(args: string[]): Promise<number> {
     fail(`the proxy gave no verdict on its config within 15 s: \`docker logs ${config.name}\` says why`, 1)
 
   if (verdict.state === 'error') {
-    warn(!restarted ? 'nginx refused the new config and keeps serving the last one it accepted' : 'nginx refused the config, so the proxy serves nothing until it is fixed', verdict.detail)
+    warn(restarted ? 'nginx refused the config, so the proxy serves nothing until it is fixed' : 'nginx refused the new config and keeps serving the last one it accepted', verdict.detail)
 
     return 1
   }
