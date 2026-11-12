@@ -15,6 +15,7 @@ const container = `devproxy-entrypoint-test-${process.pid}`
 afterAll(() => {
   if (usable)
     Bun.spawnSync(['docker', 'rm', '-f', container], { stdout: 'ignore', stderr: 'ignore' })
+
   rmSync(dir, { recursive: true, force: true })
 })
 
