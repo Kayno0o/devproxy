@@ -60,6 +60,16 @@ describe('render', () => {
     expect(renderGroupSni({ name: 'wt-x', routes: [{ host: 'x.api.localhost', to: 'x-nginx:443', passthrough: true }] })).toContain('x.api.localhost x-nginx:443;')
   })
 
+  test.each([
+    [443, 'return 301 https://$host$request_uri;', 'X-Forwarded-Port  443;'],
+    [8443, 'return 301 https://$host:8443$request_uri;', 'X-Forwarded-Port  8443;'],
+  ])('http redirects to, and upstreams are told, the https port %d', (https, redirect, forwarded) => {
+    const ported = { ...config, ports: { http: 80, https } }
+
+    expect(renderNginx(ported)).toContain(redirect)
+    expect(renderHttp(ported, { name: 'main', routes: ported.routes })).toContain(forwarded)
+  })
+
   test('nginx.conf and compose point at the configured folder, name, ports and network', () => {
     expect(renderNginx(config)).toContain('include /srv/proxy/nginx/main.conf;\n    include /srv/proxy/nginx/http/*.conf;')
     expect(renderCompose({ ...config, ports: { http: 8080, https: 8443 } }, undefined)).toContain('container_name: devproxy-test\n')

@@ -41,7 +41,7 @@ function sniKey(host: string): string {
 }
 
 // A container upstream is resolved per request through a variable, so the proxy starts and reloads while that stack is down; host.docker.internal comes from /etc/hosts, which nginx's resolver never reads, so it stays static.
-function proxyTo(to: string, buffering: boolean | undefined): string[] {
+function proxyTo(to: string, buffering: boolean | undefined, httpsPort: number): string[] {
   const url = upstreamUrl(to)
   const origin = `${url.protocol}//${url.host}`
   const pass = url.hostname === 'host.docker.internal'
@@ -56,7 +56,7 @@ function proxyTo(to: string, buffering: boolean | undefined): string[] {
     'proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;',
     'proxy_set_header X-Forwarded-Proto $scheme;',
     'proxy_set_header X-Forwarded-Host  $host;',
-    'proxy_set_header X-Forwarded-Port  443;',
+    `proxy_set_header X-Forwarded-Port  ${httpsPort};`,
     'proxy_set_header Upgrade           $http_upgrade;',
     'proxy_set_header Connection        $connection_upgrade;',
     ...url.protocol === 'https:' ? ['proxy_ssl_server_name on;'] : [],
@@ -65,8 +65,8 @@ function proxyTo(to: string, buffering: boolean | undefined): string[] {
   ]
 }
 
-function location(entry: Location): string[] {
-  const body = entry.redirect === undefined ? proxyTo(entry.to!, entry.buffering) : [`return 302 ${entry.redirect}$is_args$args;`]
+function location(entry: Location, httpsPort: number): string[] {
+  const body = entry.redirect === undefined ? proxyTo(entry.to!, entry.buffering, httpsPort) : [`return 302 ${entry.redirect}$is_args$args;`]
 
   return [
     ...entry.comment === undefined ? [] : [`# ${entry.comment}`],
@@ -76,7 +76,7 @@ function location(entry: Location): string[] {
   ]
 }
 
-function server(route: Route, cert: string, key: string): string[] {
+function server(route: Route, cert: string, key: string, httpsPort: number): string[] {
   return [
     ...route.comment === undefined ? [] : [`# ${route.comment}`],
     'server {',
@@ -90,7 +90,7 @@ function server(route: Route, cert: string, key: string): string[] {
       `ssl_certificate_key ${key};`,
       ...route.lines === undefined ? [] : ['', ...route.lines],
       '',
-      ...[...route.locations ?? [], { path: '/', to: route.to, ...route.buffering === undefined ? {} : { buffering: route.buffering } }].flatMap(entry => [...location(entry), '']).slice(0, -1),
+      ...[...route.locations ?? [], { path: '/', to: route.to, ...route.buffering === undefined ? {} : { buffering: route.buffering } }].flatMap(entry => [...location(entry, httpsPort), '']).slice(0, -1),
     ], '    '),
     '}',
   ]
@@ -102,7 +102,7 @@ export function renderHttp(config: Resolved, group: Group): string {
   const cert = join(config.dir, paths.cert(group.name))
   const key = join(config.dir, paths.key(group.name))
 
-  return `${[HEADER, `# group ${group.name}`, '', ...routes.flatMap(route => [...server(route, cert, key), ''])].join('\n').trimEnd()}\n`
+  return `${[HEADER, `# group ${group.name}`, '', ...routes.flatMap(route => [...server(route, cert, key, config.ports.https), ''])].join('\n').trimEnd()}\n`
 }
 
 export function renderGroupSni(group: Group): string {
@@ -175,7 +175,7 @@ http {
         listen [::]:80 default_server;
         server_name _;
 
-        return 301 https://$host$request_uri;
+        return 301 https://$host${config.ports.https === 443 ? '' : `:${config.ports.https}`}$request_uri;
     }
 
     # A browser reuses an HTTP/2 connection for any host the certificate covers, so a request can land on a server not meant for it: 421 makes the browser open a new connection.
