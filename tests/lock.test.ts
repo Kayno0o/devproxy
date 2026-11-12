@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, test } from 'bun:test'
@@ -24,7 +24,7 @@ test('runs one holder at a time, and the waiter hears it waits', async () => {
   await Bun.sleep(20)
   await locked(dir, async () => {
     order.push('b')
-  }, () => heard++)
+  }, { waiting: () => heard++ })
   await slow
 
   expect(order).toEqual(['a start', 'a end', 'b'])
@@ -53,5 +53,40 @@ test('breaks a lock left by a process that died holding it', async () => {
   mkdirSync(left)
   utimesSync(left, new Date(Date.now() - 120_000), new Date(Date.now() - 120_000))
 
-  expect(await locked(dir, async () => 'taken', undefined, 60_000)).toBe('taken')
+  expect(await locked(dir, async () => 'taken', { staleMs: 60_000 })).toBe('taken')
+})
+
+test('a restore meeting a lock taken meanwhile leaves it to its holder', async () => {
+  const path = join(dir, '.lock')
+  const old = new Date(Date.now() - 120_000)
+  const order: string[] = []
+  let other: Promise<void> | undefined
+
+  mkdirSync(path)
+  writeFileSync(join(path, 'owner'), 'dead')
+  utimesSync(path, old, old)
+
+  await locked(dir, async () => {
+    order.push('mine')
+  }, {
+    staleMs: 60_000,
+    // Another waiter broke the dead lock and took it between this one's check and its move, so the lock moved aside is fresh.
+    beforeMove: () => {
+      rmSync(path, { recursive: true })
+      mkdirSync(path)
+      writeFileSync(join(path, 'owner'), 'fresh')
+    },
+    // Meanwhile its holder found no lock to release, and a third caller took the free one.
+    beforeRestore: () => {
+      other = locked(dir, async () => {
+        order.push('other start')
+        await Bun.sleep(300)
+        order.push('other end')
+      })
+    },
+  })
+  await other
+
+  expect(order).toEqual(['other start', 'other end', 'mine'])
+  expect(readdirSync(dir)).toEqual([])
 })

@@ -161,7 +161,7 @@ export async function applyAndWait(config: Resolved, { change, runtime = false }
       fail(`the proxy gave no verdict on the new config within 15 s: \`docker logs ${config.name}\` says why`, 1)
 
     return { changed, removed, verdict, running: live }
-  }, () => note('waiting for another devproxy apply to finish'))
+  }, { waiting: () => note('waiting for another devproxy apply to finish') })
 }
 
 const DEBOUNCE_MS = 500
