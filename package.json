@@ -1,7 +1,7 @@
 {
   "name": "@kaynooo/devproxy",
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A local HTTPS reverse proxy for docker compose stacks: nginx and mkcert, every route generated from one config file.",
   "author": "Kaynooo <contact@kaynooo.fr>",
   "license": "MIT",
