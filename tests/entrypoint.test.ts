@@ -57,7 +57,7 @@ test.skipIf(!usable)('a change keeping a file\'s size and mtime second is still 
   const { atime, mtime } = statSync(extra)
   const run = Bun.spawnSync(['docker', 'run', '-d', '--name', container, '--add-host', 'host.docker.internal:host-gateway', '-v', `${dir}:${dir}`, '-v', `${join(import.meta.dir, '../src/entrypoint.sh')}:/devproxy-entrypoint.sh:ro`, '-e', `DEVPROXY_CONF=${join(dir, paths.nginx)}`, '-e', 'DEVPROXY_POLL_INTERVAL=1', '--entrypoint', 'sh', config.image, '/devproxy-entrypoint.sh'], { stdout: 'pipe', stderr: 'pipe' })
 
-  expect(run.stderr.toString()).toBe('')
+  expect(run.exitCode, run.stderr.toString()).toBe(0)
   expect(await verdict(status, 'ok')).toStartWith('ok')
   // One poll round, so the entrypoint has fingerprinted the first version.
   await Bun.sleep(1500)

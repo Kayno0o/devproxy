@@ -148,11 +148,13 @@ export async function applyAndWait(config: Resolved, { change, runtime = false }
     writeSnapshot(config)
 
     const { changed, removed } = apply(config, mkcert)
+    // nginx only reads its own files and the certs; a new compose file reaches the proxy when `up` recreates it.
+    const fresh = changed.length > 0 || removed.length > 0
 
     changed.unshift(...written)
     const live = await running(config)
 
-    if (!live || (!changed.length && !removed.length))
+    if (!live || !fresh)
       return { changed, removed, verdict: undefined, running: live }
 
     const verdict = await waitVerdict(config, since)

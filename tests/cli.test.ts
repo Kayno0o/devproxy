@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 const CLI = new URL('../src/cli.ts', import.meta.url).pathname
 let home: string
 
-// PATH holds only bun's folder, so no docker answers and the proxy reads as not running; mkcert is a stub writing placeholder files.
+// PATH holds only bun's folder, so no docker answers and the proxy reads as not running unless a test writes a docker stub; mkcert is a stub writing placeholder files.
 function devproxy(args: string[], stdin?: string) {
   const env = { HOME: home, XDG_CONFIG_HOME: join(home, '.config'), PATH: `${join(home, 'bin')}:${process.execPath.replace(/\/[^/]+$/, '')}` }
   const run = Bun.spawnSync([process.execPath, CLI, ...args], { env, stdin: stdin === undefined ? 'ignore' : Buffer.from(stdin), stdout: 'pipe', stderr: 'pipe' })
@@ -71,12 +71,15 @@ describe('devproxy', () => {
     expect(readFileSync(join(home, 'state/compose.yml'), 'utf8')).not.toContain('watch:')
   })
 
-  // A docker whose proxy is stopped, and whose `compose up` starts one that writes the given verdict, as the entrypoint does.
-  function dockerStartingWith(verdict: string) {
+  // A docker whose proxy runs or not, and whose `compose up` (re)starts one that writes the given verdict as the entrypoint does, or leaves the proxy as it is.
+  function docker(running: boolean, verdict?: string) {
     const status = join(home, 'state/nginx/.status')
+    const compose = verdict === undefined ? ':' : `printf '%s\\n' '${verdict}' > '${status}'`
 
-    writeFileSync(join(home, 'bin/docker'), `#!/bin/sh\ncase "$1" in\n  inspect) [ "$2" = network ] || echo false;;\n  compose) printf '%s\\n' '${verdict}' > '${status}';;\nesac\n`, { mode: 0o755 })
+    writeFileSync(join(home, 'bin/docker'), `#!/bin/sh\ncase "$1" in\n  inspect) [ "$2" = network ] || echo ${running};;\n  compose) ${compose};;\nesac\n`, { mode: 0o755 })
   }
+
+  const dockerStartingWith = (verdict: string) => docker(false, verdict)
 
   test('up exits 1 when nginx refuses the config it starts on', () => {
     const config = join(home, 'proxy.ts')
@@ -102,6 +105,38 @@ describe('devproxy', () => {
     expect(run.code).toBe(0)
     expect(run.out).toContain('is up on 80 and 443')
   })
+
+  test('up on a running proxy with nothing new reports the verdict it holds', () => {
+    const config = join(home, 'proxy.ts')
+
+    writeFileSync(config, `export default { dir: './state', labels: false }\n`)
+    dockerStartingWith('error 2026-01-01T00:00:00Z\nunknown directive "bogus"')
+    devproxy(['up', '-c', config])
+    docker(true)
+
+    const run = devproxy(['up', '-c', config])
+
+    expect(run.code).toBe(1)
+    expect(run.err).toContain('keeps serving the last one it accepted')
+    expect(run.err).toContain('unknown directive "bogus"')
+  })
+
+  test('up after a ports change waits for the recreated proxy, not for nginx to answer a compose file it never reads', () => {
+    const config = join(home, 'proxy.ts')
+
+    writeFileSync(config, `export default { dir: './state', labels: false }\n`)
+    dockerStartingWith('ok 2026-01-01T00:00:00Z')
+    expect(devproxy(['up', '-c', config]).code).toBe(0)
+
+    writeFileSync(config, `export default { dir: './state', labels: false, ports: { http: 8080 } }\n`)
+    docker(true, 'error 2026-01-01T00:00:00Z\nbind() to 0.0.0.0:80 failed')
+
+    const run = devproxy(['up', '-c', config])
+
+    expect(run.code).toBe(1)
+    expect(run.err).toContain('serves nothing until it is fixed')
+    expect(run.err).toContain('bind() to 0.0.0.0:80 failed')
+  }, 30_000)
 
   test('set refuses invalid routes with a usage error and registers nothing', () => {
     const config = join(home, 'proxy.ts')

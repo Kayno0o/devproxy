@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import process from 'node:process'
 import { fail, jsonOption, note, ok, parse, printJson, warn } from '@kaynooo/cli-kit'
 import { dropGroup, readGroups, readLabelReport, readSnapshot, readVerdict, saveGroup, waitVerdict } from './apply'
+import { paths } from './render'
 import { applyAndWait, defaultConfigPath, dockerSources, down, load, running, up, watch } from './runtime'
 
 const configOption = { config: { type: 'string', short: 'c', description: `the config file (${'$'}DEVPROXY_CONFIG, else ~/.config/devproxy/config.ts)` } } as const
@@ -62,14 +63,15 @@ export async function upCommand(args: string[]): Promise<number> {
 
   await up(config)
 
-  // A proxy that was stopped tests its config as it starts; a running one already gave its verdict, or kept its last one when nothing changed.
-  const verdict = outcome.running ? outcome.verdict ?? readVerdict(config) : await waitVerdict(config, since)
+  // A proxy started, or recreated for a new compose file, tests its config as it starts; a running one already gave its verdict, or kept its last one when nothing changed.
+  const restarted = !outcome.running || outcome.changed.includes(paths.compose)
+  const verdict = restarted ? await waitVerdict(config, since) : outcome.verdict ?? readVerdict(config)
 
   if (verdict === undefined)
     fail(`the proxy gave no verdict on its config within 15 s: \`docker logs ${config.name}\` says why`, 1)
 
   if (verdict.state === 'error') {
-    warn(outcome.running ? 'nginx refused the new config and keeps serving the last one it accepted' : 'nginx refused the config, so the proxy serves nothing until it is fixed', verdict.detail)
+    warn(!restarted ? 'nginx refused the new config and keeps serving the last one it accepted' : 'nginx refused the config, so the proxy serves nothing until it is fixed', verdict.detail)
 
     return 1
   }
